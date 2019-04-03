@@ -7,7 +7,7 @@ import astropy.units as u
 from astropy.time import Time
 
 from ..generators import NoiseGenerator
-from ..pfb import PolyphaseFilterBank
+from ..pfb import PolyphaseFilterBankSamples, PolyphaseFilterBank
 
 
 class TestBasics:
@@ -44,11 +44,14 @@ class TestBasics:
         ft2_hd = np.fft.rfft(hd.sum(0))
         assert_allclose(ft1_hd, ft2_hd)
 
-        # Check actual implementation.
-        pfb = PolyphaseFilterBank(self.nh, self.pfb)
+        # Check actual implementations.
+        pfb = PolyphaseFilterBankSamples(self.nh, self.pfb)
         ft_pfb = pfb.read(2)
         assert_allclose(ft_pfb[0], ft2_hd)
         assert_allclose(ft_pfb[1], np.fft.rfft((self.pfb * d[1:]).sum(0)))
+        pfb2 = PolyphaseFilterBank(self.nh, self.pfb)
+        ft_pfb2 = pfb2.read(2)
+        assert_allclose(ft_pfb2, ft_pfb)
 
     def test_understanding_complex(self):
         # Check above holds for complex too.
@@ -60,6 +63,9 @@ class TestBasics:
         assert_allclose(ft1_hc, ft2_hc)
 
         # And check actual implementation.
+        pfb = PolyphaseFilterBankSamples(self.nc, self.pfb)
+        ft_pfb = pfb.read(1)[0]
+        assert_allclose(ft_pfb, ft2_hc)
         pfb = PolyphaseFilterBank(self.nc, self.pfb)
         ft_pfb = pfb.read(1)[0]
         assert_allclose(ft_pfb, ft2_hc)
