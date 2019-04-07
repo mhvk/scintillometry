@@ -10,6 +10,38 @@ from .channelize import Channelize
 __all__ = ['PolyphaseFilterBankSamples', 'PolyphaseFilterBank']
 
 
+def sinc_hamming(n_tap, n_sample, sinc_scale=1.):
+    r"""Construct a sinc-hamming polyphase filter.
+
+    The sinc-hamming filter is defined by
+
+    .. math::  \frac{\sin(\pi x)}{\pi x}
+               \left[0.54 - 0.46\cos\left(\frac{2\pi k}{N-1}\right)\right]
+               \qquad x = n_{\rm tap} scale \left(\frac{n}{N} - 0.5\right),
+               \qquad N=n_{\rm tap} n_{\rm sample}, \quad 0 \leq k \leq N-1
+
+    Parameters
+    ----------
+    n_tap : int
+        Number of taps of the polyphase filter.
+    n_samples : int
+        Number of samples to pass on to the FFT stage.
+    sinc_scale : float
+        Possible scaling for the sinc factor, to widen or narrow the channels.
+
+    Examples
+    --------
+    Construct the CHIME and GUPPI baseband polyphase filter responses::
+
+    >>> from baseband_tasks.pfb import sinc_hamming
+    >>> chime_ppf = sinc_hamming(4, 2048)
+    >>> guppi_ppf = sinc_hamming(12, 64, sinc_scale=0.95)
+    """
+    n = n_tap * n_sample
+    x = n_tap * sinc_scale * np.linspace(-0.5, 0.5, n, endpoint=False)
+    return (np.sinc(x) * np.hamming(n)).reshape(n_tap, n_sample)
+
+
 class PolyphaseFilterBankSamples(Channelize):
     """Channelize a time stream using a polyphase filter bank.
 
