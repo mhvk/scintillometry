@@ -40,10 +40,8 @@ class TestBasics:
                                  samples_per_frame=128, dtype='c16')
         self.n_tap = 4
         self.n_chan = 2048
-        n = self.n_tap * self.n_chan
-        r = self.n_tap
-        x = r * np.linspace(-0.5, 0.5, n, endpoint=False)
-        self.pfb = (np.sinc(x) * np.hamming(4 * 2048)).reshape(4, 2048)
+        self.chime_pfb = sinc_hamming(4, 2048)  # CHIME PFB
+        self.guppi_pfb = sinc_hamming(12, 64, sinc_scale=0.95)
 
     @pytest.mark.parametrize('offset', (0, 1000))
     def test_understanding(self, offset):
@@ -58,18 +56,19 @@ class TestBasics:
         self.nh.seek(offset * 2048)
         # First check for real data.
         d = self.nh.read(5 * 2048).reshape(-1, 2048)
-        hd = self.pfb * d[:4]
+        hd = self.chime_pfb * d[:4]
         ft1_hd = np.fft.rfft(hd.ravel())[::4]
         ft2_hd = np.fft.rfft(hd.sum(0))
         assert_allclose(ft1_hd, ft2_hd)
 
         # Check actual implementations.
-        pfb = PolyphaseFilterBankSamples(self.nh, self.pfb)
+        pfb = PolyphaseFilterBankSamples(self.nh, self.chime_pfb)
         pfb.seek(offset)
         ft_pfb = pfb.read(2)
         assert_allclose(ft_pfb[0], ft2_hd)
-        assert_allclose(ft_pfb[1], np.fft.rfft((self.pfb * d[1:]).sum(0)))
-        pfb2 = PolyphaseFilterBank(self.nh, self.pfb)
+        assert_allclose(ft_pfb[1],
+                        np.fft.rfft((self.chime_pfb * d[1:]).sum(0)))
+        pfb2 = PolyphaseFilterBank(self.nh, self.chime_pfb)
         pfb2.seek(offset)
         ft_pfb2 = pfb2.read(2)
         assert_allclose(ft_pfb2, ft_pfb)
@@ -79,17 +78,17 @@ class TestBasics:
         # Check above holds for complex too.
         self.nc.seek(offset * 2048)
         c = self.nc.read(4 * 2048).reshape(-1, 2048)
-        hc = self.pfb * c
+        hc = self.chime_pfb * c
         ft1_hc = np.fft.fft(hc.ravel())[::4]
         ft2_hc = np.fft.fft(hc.sum(0))
         assert_allclose(ft1_hc, ft2_hc)
 
         # And check actual implementation.
-        pfb = PolyphaseFilterBankSamples(self.nc, self.pfb)
+        pfb = PolyphaseFilterBankSamples(self.nc, self.chime_pfb)
         pfb.seek(offset)
         ft_pfb = pfb.read(1)[0]
         assert_allclose(ft_pfb, ft2_hc)
-        pfb2 = PolyphaseFilterBank(self.nc, self.pfb)
+        pfb2 = PolyphaseFilterBank(self.nc, self.chime_pfb)
         pfb2.seek(offset)
         ft_pfb2 = pfb2.read(1)[0]
         assert_allclose(ft_pfb2, ft2_hc)
@@ -98,7 +97,7 @@ class TestBasics:
         n_sample = 128
         self.nh.seek(3 * 2048)
         d_in = self.nh.read(n_sample * 2048).reshape(-1, 2048)
-        pfb = PolyphaseFilterBank(self.nh, self.pfb,
+        pfb = PolyphaseFilterBank(self.nh, self.chime_pfb,
                                   samples_per_frame=n_sample)
         ft_pfb = pfb.read(n_sample+3)
         # Dechannelize.
@@ -108,18 +107,38 @@ class TestBasics:
         ft_dec /= pfb._ft_response_conj
         d_out = np.fft.irfft(ft_dec, axis=0, n=d_pfb.shape[0])
         d_out = d_out[3:]
-        # We cannot hope to deconvolve near the edges, which means we loose
-        # the middle samples.
+        # We cannot hope to deconvolve near the edges and the PFB is such
+        # that we loose the middle samples.
         assert_allclose(d_in[32:-32, :950], d_out[32:-32, :950], atol=0.01)
         assert_allclose(d_in[32:-32, 1100:], d_out[32:-32, 1100:], atol=0.01)
 
-    def test_inversion(self):
+    def test_inversion_chime_pfb(self):
+        # Now test the same, but with the actual inversion class.
+        # Here, we do not give samples_per_frame for the PFB, since we do
+        # not need its FT (and it is exact for any value).
+        n_sample = 128
         self.nh.seek(3 * 2048)
-        d_in = self.nh.read(128 * 2048).reshape(-1, 2048)
-        pfb = PolyphaseFilterBank(self.nh, self.pfb)
-        ipfb = InversePolyphaseFilterBank(pfb, self.pfb, sn=1e9, n=2048,
-                                          samples_per_frame=128*2048,
+        d_in = self.nh.read(n_sample * 2048).reshape(-1, 2048)
+        pfb = PolyphaseFilterBank(self.nh, self.chime_pfb)
+        ipfb = InversePolyphaseFilterBank(pfb, self.chime_pfb, sn=1e9, n=2048,
+                                          samples_per_frame=n_sample*2048,
                                           dtype=self.nh.dtype)
-        d_out = ipfb.read(128 * 2048).reshape(-1, 2048)
+        d_out = ipfb.read(n_sample * 2048).reshape(-1, 2048)
         assert_allclose(d_in[32:-32, :950], d_out[32:-32, :950], atol=0.01)
         assert_allclose(d_in[32:-32, 1100:], d_out[32:-32, 1100:], atol=0.01)
+
+    def test_inversion_guppi_pfb(self):
+        # Now test the same, but with the actual inversion class.
+        # Here, we do not give samples_per_frame for the PFB, since we do
+        # not need its FT (and it is exact for any value).
+        n_sample = 512
+        self.nh.seek(11 * 64)
+        d_in = self.nh.read(n_sample * 64).reshape(-1, 64)
+        pfb = PolyphaseFilterBank(self.nh, self.guppi_pfb)
+        ipfb = InversePolyphaseFilterBank(pfb, self.guppi_pfb, sn=1e9, n=64,
+                                          samples_per_frame=n_sample*64,
+                                          dtype=self.nh.dtype)
+        d_out = ipfb.read(n_sample * 64).reshape(-1, 64)
+        # Note: with fewer samples, more is lost near the edges.
+        assert_allclose(d_in[64:-64, :29], d_out[64:-64, :29], atol=0.01)
+        assert_allclose(d_in[64:-64, 36:], d_out[64:-64, 36:], atol=0.01)
