@@ -5,6 +5,7 @@ import operator
 import warnings
 
 import numpy as np
+from scipy.sparse import csr_matrix
 import astropy.units as u
 from astropy.utils import ShapedLikeNDArray, lazyproperty
 
@@ -388,19 +389,41 @@ class Fold(Integrate):
     def _integrate(self, item, raw):
         # Get sample and phase indices.
         raw_items = np.arange(item.start, item.stop)
+        # map raw sample to folded sample.
+        sample_map = {}
         if self.samples_per_frame == 1:
             sample_index = 0
+            sample_map[sample_index] = (0, len(raw_items))
         else:
             sample_index = np.searchsorted(self._offsets[1:], raw_items)
+            # Detect where the sample index changes
+            sample_index_diff = np.diff(sample_index)
+            edges = np.where(sample_index_diff != 0)[0] + 1
+            pad_edges = np.hstack((edges, len(raw_items)))
+            sample_map[sample_index[0]] = (0, pad_edges[0])
+            for ii, e in enumerate(edges):
+                sample_map[sample_index[e]] = (e, pad_edges[ii + 1])
+
 
         # TODO: allow having a phase reference.
         phases = self.phase(self._raw_time + raw_items / self.ih.sample_rate)
         phase_index = ((phases % (1. * u.cycle)).to_value(u.cycle) *
                        self.n_phase).astype(int)
-        # Do the actual folding, adding the data to the sums and counts.
-        # TODO: np.add.at is not very efficient; replace?
-        np.add.at(self._frame['data'], (sample_index, phase_index), raw)
-        np.add.at(self._frame['count'], (sample_index, phase_index), 1)
+
+        for sp_idx, raw_sp_idx in sample_map.items():
+            target_phase_index = phase_index[raw_sp_idx[0]:raw_sp_idx[1]]
+            n_ph_sample = target_phase_index.shape[0]
+            index_map_matrix = csr_matrix((np.ones(n_ph_sample),
+                                          (target_phase_index,
+                                           np.arange(n_ph_sample))),
+                                           shape=(self.n_phase, n_ph_sample)).toarray()
+            self._frame['data'][sp_idx] += np.tensordot(index_map_matrix,
+                                               raw[raw_sp_idx[0]:raw_sp_idx[1]],
+                                               axes=([1,], [0,]))
+            counts = np.sum(index_map_matrix, axis=1,
+                            dtype=int).reshape((self.sample_shape[0],) +
+                                               (1,) * len(self.sample_shape[1:]))
+            self._frame['count'][sp_idx] += counts
 
 
 class Stack(BaseTaskBase):
