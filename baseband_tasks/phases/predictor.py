@@ -1,5 +1,5 @@
 # Licensed under the GPLv3 - see LICENSE
-r"""Read in and use tempo1 polyco files (tempo2 predict to come).
+r"""Read in and use tempo1 polyco files.
 
 Examples
 --------
@@ -14,32 +14,32 @@ For use with folding codes with times since some start time t0 in seconds:
 
 Notes
 -----
-The format of the polyco files is (from
-http://tempo.sourceforge.net/ref_man_sections/tz-polyco.txt)
+The format of the polyco files is
 
 .. code-block:: text
 
     Line  Columns Item
     ----  ------- -----------------------------------
     1      1-10   Pulsar Name
-          11-19   Date (dd-mmm-yy)
-          20-31   UTC (hhmmss.ss)
+          12-20   Date (dd-mmm-yy)
+          21-31   UTC (hhmmss.ss)
           32-51   TMID (MJD)
-          52-72   DM
+          52-72   Dispersion Measure (pc / cm^3)
           74-79   Doppler shift due to earth motion (10^-4)
           80-86   Log_10 of fit rms residual in periods
     2      1-20   Reference Phase (RPHASE)
-          21-38   Reference rotation frequency (F0)
+          22-38   Reference rotation frequency (F0)
           39-43   Observatory number
           44-49   Data span (minutes)
           50-54   Number of coefficients
-          55-75   Observing frequency (MHz)
-          76-80   Binary phase
+          55-64   Observing frequency (MHz)
+          65-71   (Optional) Binary orbit phase
+          72-80   (Optional) Orbital frequency (1/day)
     3-     1-25   Coefficient 1 (COEFF(1))
           26-50   Coefficient 2 (COEFF(2))
           51-75   Coefficient 3 (COEFF(3))
 
-The pulse phase and frequency at time T are then calculated as::
+The pulse phase and frequency at time T (in MJD) are then calculated as::
 
     DT = (T-TMID)*1440
     PHASE = RPHASE + DT*60*F0 + COEFF(1) + DT*COEFF(2) + DT^2*COEFF(3) + ....
@@ -49,15 +49,20 @@ Example tempo2 call to produce one:
 
 .. code-block:: text
 
-    tempo2 -tempo1 -f psrb1957+20.par \
+    tempo2 -tempo1 -f pulsar.par
         -polyco "56499 56500 300 12 12 aro 150.0"
                  |-- MJD start
                        |-- MJD end
-                             |-- number of minutes for which polynomial is fit
-                                 |-- degree of the polynomial
-                                    |-- maxium Hour Angle (12 is continuous)
-                                       |-- Observatory
+                             |-- length of span (in minutes)
+                                 |-- Number of polynomial coefficients
+                                    |-- Max Hour Angle (12 is continuous)
+                                       |-- Observatory code
                                            |-- Frequency in MHz
+
+References
+----------
+http://tempo.sourceforge.net/ref_man_sections/tz-polyco.txt
+https://bitbucket.org/psrsoft/tempo2/
 """
 
 from collections import OrderedDict
